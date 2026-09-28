@@ -21,7 +21,7 @@
   },
   "type": "module",
   "bin": {
-    "app-store-connect-mcp": "./dist/src/index.js"
+    "app-store-connect-mcp": "dist/src/index.js"
   },
   "files": [
     "dist/src/**/*.js",
