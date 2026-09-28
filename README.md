@@ -2,16 +2,11 @@
 
 A [Model Context Protocol](https://modelcontextprotocol.io) server for the [App Store Connect API](https://developer.apple.com/documentation/appstoreconnectapi). It lets AI assistants manage apps, versions, localizations, screenshots, TestFlight, bundle IDs, devices, users, and analytics reports.
 
+[![npm](https://img.shields.io/npm/v/@yunyang088/app-store-connect-mcp-server)](https://www.npmjs.com/package/@yunyang088/app-store-connect-mcp-server)
+
 > Forked from [JoshuaRileyDev/app-store-connect-mcp-server](https://github.com/JoshuaRileyDev/app-store-connect-mcp-server) (archived).
 
 ## Setup
-
-```bash
-git clone https://github.com/yunyang088/app-store-connect-mcp-server.git
-cd app-store-connect-mcp-server
-npm install
-npm run build
-```
 
 Create an API key in [App Store Connect → Users and Access → Integrations](https://appstoreconnect.apple.com/access/integrations/api), download the `.p8` file, and note the Key ID and Issuer ID.
 
@@ -21,8 +16,8 @@ Add the server to your MCP client config (e.g. `claude_desktop_config.json`):
 {
   "mcpServers": {
     "app-store-connect": {
-      "command": "node",
-      "args": ["/absolute/path/to/app-store-connect-mcp-server/dist/src/index.js"],
+      "command": "npx",
+      "args": ["-y", "@yunyang088/app-store-connect-mcp-server"],
       "env": {
         "APP_STORE_CONNECT_KEY_ID": "YOUR_KEY_ID",
         "APP_STORE_CONNECT_ISSUER_ID": "YOUR_ISSUER_ID",
@@ -41,7 +36,7 @@ claude mcp add app-store-connect \
   -e APP_STORE_CONNECT_KEY_ID=YOUR_KEY_ID \
   -e APP_STORE_CONNECT_ISSUER_ID=YOUR_ISSUER_ID \
   -e APP_STORE_CONNECT_P8_PATH=/path/to/AuthKey_XXXXXXXXXX.p8 \
-  -- node /absolute/path/to/app-store-connect-mcp-server/dist/src/index.js
+  -- npx -y @yunyang088/app-store-connect-mcp-server
 ```
 
 `APP_STORE_CONNECT_VENDOR_NUMBER` is optional. When set, the sales and finance report tools are enabled.
@@ -71,6 +66,9 @@ Notes:
 ## Development
 
 ```bash
+git clone https://github.com/yunyang088/app-store-connect-mcp-server.git
+cd app-store-connect-mcp-server
+npm install
 npm run build   # compile TypeScript to dist/
 npm start       # run the server on stdio
 ```

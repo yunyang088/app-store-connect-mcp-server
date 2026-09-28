@@ -1,13 +1,44 @@
 {
-  "name": "appstore-connect-mcp-server",
+  "name": "@yunyang088/app-store-connect-mcp-server",
   "version": "1.1.2",
-  "type": "module",
-  "scripts": {
-    "build": "tsc && shx chmod +x dist/src/*.js",
-    "start": "node dist/src/index.js"
+  "description": "MCP server for the App Store Connect API: apps, versions, localizations, screenshots, TestFlight, bundle IDs, devices, users, and analytics.",
+  "keywords": [
+    "mcp",
+    "model-context-protocol",
+    "app-store-connect",
+    "appstoreconnect",
+    "ios",
+    "testflight"
+  ],
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/yunyang088/app-store-connect-mcp-server.git"
   },
+  "homepage": "https://github.com/yunyang088/app-store-connect-mcp-server#readme",
+  "bugs": {
+    "url": "https://github.com/yunyang088/app-store-connect-mcp-server/issues"
+  },
+  "type": "module",
   "bin": {
-    "appstore-connect-mcp": "./dist/src/index.js"
+    "app-store-connect-mcp": "./dist/src/index.js"
+  },
+  "files": [
+    "dist/src/**/*.js",
+    "!dist/src/**/*.bak",
+    "README.md",
+    "LICENSE"
+  ],
+  "engines": {
+    "node": ">=18"
+  },
+  "publishConfig": {
+    "access": "public"
+  },
+  "scripts": {
+    "build": "shx rm -rf dist && tsc && shx chmod +x dist/src/*.js",
+    "prepublishOnly": "npm run build",
+    "start": "node dist/src/index.js"
   },
   "dependencies": {
     "@modelcontextprotocol/sdk": "^1.29.0",
