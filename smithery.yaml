@@ -1,15 +1,15 @@
 schema_version: v1
 name: appstore-connect-mcp-server
-description: A Model Context Protocol (MCP) server for interacting with the App Store Connect API. Supports app management, beta testing, analytics, and optional sales/finance reporting.
-repository: https://github.com/JoshuaRileyDev/app-store-connect
-homepage: https://github.com/JoshuaRileyDev/app-store-connect
+description: A Model Context Protocol (MCP) server for interacting with the App Store Connect API. Supports app management, localizations, screenshots, beta testing, analytics, and optional sales/finance reporting.
+repository: https://github.com/yunyang088/app-store-connect-mcp-server
+homepage: https://github.com/yunyang088/app-store-connect-mcp-server
 license: MIT
 runtime: docker
 vendor:
-  name: Joshua Riley
-  github: JoshuaRileyDev
+  name: yunyang088
+  github: yunyang088
 mcp:
-  version: 1.0.3
+  version: 1.1.2
   protocol_version: "0.1"
   compatible_clients:
     - name: claude

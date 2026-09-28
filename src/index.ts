@@ -48,7 +48,7 @@ class AppStoreConnectServer {
   constructor() {
     this.server = new Server({
       name: "appstore-connect-server",
-      version: "1.0.0"
+      version: "1.1.2"
     }, {
       capabilities: {
         tools: {}
