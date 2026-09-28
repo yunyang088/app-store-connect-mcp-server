@@ -64,8 +64,8 @@ export class AppStoreConnectClient {
       const response = await axios.get<ArrayBuffer>(url, { headers, responseType: 'arraybuffer' });
       return {
         data: AppStoreConnectClient.decodeBody(Buffer.from(response.data)),
-        contentType: response.headers['content-type'],
-        size: response.headers['content-length']
+        contentType: String(response.headers['content-type'] ?? ''),
+        size: String(response.headers['content-length'] ?? '')
       };
     } catch (e: any) {
       // arraybuffer 模式下错误体也是二进制，转成文本方便看报错

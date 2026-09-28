@@ -1,6 +1,6 @@
 {
   "name": "@yunyang088/app-store-connect-mcp-server",
-  "version": "1.1.2",
+  "version": "1.1.3",
   "description": "MCP server for the App Store Connect API: apps, versions, localizations, screenshots, TestFlight, bundle IDs, devices, users, and analytics.",
   "keywords": [
     "mcp",
@@ -42,9 +42,8 @@
   },
   "dependencies": {
     "@modelcontextprotocol/sdk": "^1.29.0",
-    "axios": "^1.6.0",
-    "jsonwebtoken": "^9.0.0",
-    "sharp": "^0.32.0"
+    "axios": "^1.20.0",
+    "jsonwebtoken": "^9.0.0"
   },
   "devDependencies": {
     "@types/jsonwebtoken": "^9.0.0",
