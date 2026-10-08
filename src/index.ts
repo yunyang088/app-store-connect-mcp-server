@@ -21,8 +21,22 @@ import {
   AnalyticsHandlers,
   XcodeHandlers,
   LocalizationHandlers,
-  ScreenshotHandlers 
+  ScreenshotHandlers,
+  AssetLibraryHandlers
 } from './handlers/index.js';
+
+const ASSET_PLACEMENT_TYPES = [
+  "APP_SCREENSHOT",
+  "IMESSAGE_APP_SCREENSHOT",
+  "APP_PREVIEW",
+  "PRODUCT_PAGE_HEADER_ASSET",
+  "APP_STORE_SEARCH_RESULTS_ASSET",
+  "SEARCH_RESULTS_ADS_ASSET",
+  "TODAY_TAB_ADS_ASSET",
+  "EVENT_CARD_ASSET",
+  "EVENT_DETAILS_PAGE_ASSET",
+  "RETENTION_MESSAGE_ASSET"
+];
 
 // Load environment variables
 const config: AppStoreConnectConfig = {
@@ -44,11 +58,12 @@ class AppStoreConnectServer {
   private xcodeHandlers: XcodeHandlers;
   private localizationHandlers: LocalizationHandlers;
   private screenshotHandlers: ScreenshotHandlers;
+  private assetLibraryHandlers: AssetLibraryHandlers;
 
   constructor() {
     this.server = new Server({
       name: "appstore-connect-server",
-      version: "1.1.3"
+      version: "1.2.0"
     }, {
       capabilities: {
         tools: {}
@@ -65,6 +80,7 @@ class AppStoreConnectServer {
     this.xcodeHandlers = new XcodeHandlers();
     this.localizationHandlers = new LocalizationHandlers(this.client);
     this.screenshotHandlers = new ScreenshotHandlers(this.client);
+    this.assetLibraryHandlers = new AssetLibraryHandlers(this.client);
 
     this.setupHandlers();
   }
@@ -492,13 +508,17 @@ class AppStoreConnectServer {
         // App Info Localization Tools (app name/subtitle)
         {
           name: "list_app_info_localizations",
-          description: "List all app info localizations (localized app name/subtitle) for an app. Resolves the current (non-REPLACED) app info automatically.",
+          description: "List all app info localizations (localized app name/subtitle) for an app. Provide appInfoId directly, or appId to resolve the app info automatically (prefers the editable one, e.g. PREPARE_FOR_SUBMISSION, over the live read-only one).",
           inputSchema: {
             type: "object",
             properties: {
               appId: {
                 type: "string",
-                description: "The ID of the app"
+                description: "The ID of the app (optional if appInfoId is provided)"
+              },
+              appInfoId: {
+                type: "string",
+                description: "The ID of the app info (optional if appId is provided)"
               },
               limit: {
                 type: "number",
@@ -506,13 +526,12 @@ class AppStoreConnectServer {
                 minimum: 1,
                 maximum: 200
               }
-            },
-            required: ["appId"]
+            }
           }
         },
         {
           name: "create_app_info_localization",
-          description: "Create a new app info localization (localized app name/subtitle). Provide either appInfoId directly, or appId to resolve the current (non-REPLACED) app info automatically.",
+          description: "Create a new app info localization (localized app name/subtitle). Provide either appInfoId directly, or appId to resolve the app info automatically (prefers the editable one over the live read-only one).",
           inputSchema: {
             type: "object",
             properties: {
@@ -665,6 +684,124 @@ class AppStoreConnectServer {
               }
             },
             required: ["appScreenshotSetId", "filePath"]
+          }
+        },
+
+        // Asset Library Tools (API 4.x / iOS 27 creative assets)
+        {
+          name: "get_asset_library_ref_data",
+          description: "Get Asset Library reference data: placement groups (e.g. IPHONE_DUO_PROFILE, DEFAULT_PROFILE), per-placement limits for app store versions, and image/video specs (exact sizes, aspect ratios, formats). Filter by placementType/platform to keep the result small.",
+          inputSchema: {
+            type: "object",
+            properties: {
+              placementType: {
+                type: "string",
+                enum: ASSET_PLACEMENT_TYPES,
+                description: "Only return specs/policies compatible with this placement type (optional)"
+              },
+              platform: {
+                type: "string",
+                enum: ["IPHONE_APP_STORE", "IPAD_APP_STORE", "WATCH_APP_STORE", "IMESSAGE_APP_STORE", "VISION_PRO_APP_STORE", "MAC_APP_STORE", "TV_APP_STORE"],
+                description: "Only return placement groups for this platform (optional)"
+              }
+            }
+          }
+        },
+        {
+          name: "list_asset_library_media",
+          description: "List images or videos already uploaded to an app's Asset Library",
+          inputSchema: {
+            type: "object",
+            properties: {
+              appId: { type: "string", description: "The ID of the app" },
+              mediaType: { type: "string", enum: ["IMAGE", "VIDEO"], description: "Images or videos (default: IMAGE)" },
+              category: { type: "string", enum: ["CREATIVE_ASSETS", "APP_SCREENSHOTS_AND_PREVIEWS"], description: "Filter by category (optional)" },
+              state: { type: "string", description: "Filter by state, e.g. COMPLETE, FAILED, APPROVED (optional)" },
+              limit: { type: "number", description: "Maximum number to return (default: 50)", minimum: 1, maximum: 200 }
+            },
+            required: ["appId"]
+          }
+        },
+        {
+          name: "upload_asset_library_media",
+          description: "Upload a local image (.png/.jpg) or video (.mov/.m4v/.mp4) to an app's Asset Library. Runs reserve → chunk upload → commit, then waits for processing and returns the final state (FAILED includes stateDetails, e.g. wrong dimensions). Use category CREATIVE_ASSETS for product page header / search results assets, APP_SCREENSHOTS_AND_PREVIEWS for screenshots and app previews (including iPhone Duo). Then attach it with create_asset_placement.",
+          inputSchema: {
+            type: "object",
+            properties: {
+              appId: { type: "string", description: "The ID of the app" },
+              filePath: { type: "string", description: "Absolute path to the local file" },
+              category: { type: "string", enum: ["CREATIVE_ASSETS", "APP_SCREENSHOTS_AND_PREVIEWS"], description: "Asset category" },
+              referenceName: { type: "string", description: "Name shown in the Asset Library (optional)" },
+              previewFrameTimeCode: { type: "string", description: "Video poster frame timecode, e.g. '00:00:05:00' (videos only, optional)" },
+              waitForProcessing: { type: "boolean", description: "Poll until processing finishes (default: true)" }
+            },
+            required: ["appId", "filePath", "category"]
+          }
+        },
+        {
+          name: "create_asset_placement",
+          description: "Attach an Asset Library image or video to a localization. Examples: product page header → placementType PRODUCT_PAGE_HEADER_ASSET; search results → APP_STORE_SEARCH_RESULTS_ASSET (both use placementGroup DEFAULT_PROFILE, 1 per localization; a 16:9 5244x2950 universal asset can be placed in both); iPhone Duo screenshot → APP_SCREENSHOT with placementGroup IPHONE_DUO_PROFILE (up to 10). Exactly one of imageId/videoId and exactly one localization target.",
+          inputSchema: {
+            type: "object",
+            properties: {
+              placementType: { type: "string", enum: ASSET_PLACEMENT_TYPES, description: "Where the asset is shown" },
+              placementGroup: { type: "string", description: "Placement profile group, e.g. DEFAULT_PROFILE, IPHONE_DUO_PROFILE, IPHONE_DYNAMIC_ISLAND_LARGE_PROFILE, IPAD_13_PROFILE (default: DEFAULT_PROFILE)" },
+              imageId: { type: "string", description: "Asset Library image ID" },
+              videoId: { type: "string", description: "Asset Library video ID" },
+              appStoreVersionLocalizationId: { type: "string", description: "Target app store version localization" },
+              appCustomProductPageLocalizationId: { type: "string", description: "Target custom product page localization" },
+              appEventLocalizationId: { type: "string", description: "Target in-app event localization" }
+            },
+            required: ["placementType"]
+          }
+        },
+        {
+          name: "list_asset_placements",
+          description: "List Asset Library placements (screenshots, previews, header and search results assets) on an app store version localization, with the attached image/video included",
+          inputSchema: {
+            type: "object",
+            properties: {
+              appStoreVersionLocalizationId: { type: "string", description: "The ID of the app store version localization" },
+              placementType: { type: "string", enum: ASSET_PLACEMENT_TYPES, description: "Filter by placement type (optional)" },
+              placementGroup: { type: "string", description: "Filter by placement group, e.g. IPHONE_DUO_PROFILE (optional)" },
+              limit: { type: "number", description: "Maximum number to return (default: 100)", minimum: 1, maximum: 200 }
+            },
+            required: ["appStoreVersionLocalizationId"]
+          }
+        },
+        {
+          name: "reorder_asset_placements",
+          description: "Set the display order of placements in one placement group (e.g. the iPhone Duo screenshots) on an app store version localization",
+          inputSchema: {
+            type: "object",
+            properties: {
+              appStoreVersionLocalizationId: { type: "string", description: "The ID of the app store version localization" },
+              placementGroup: { type: "string", description: "Placement group, e.g. IPHONE_DUO_PROFILE" },
+              placementIds: { type: "array", items: { type: "string" }, description: "Placement IDs in the desired order" }
+            },
+            required: ["appStoreVersionLocalizationId", "placementGroup", "placementIds"]
+          }
+        },
+        {
+          name: "delete_asset_placement",
+          description: "Remove a placement from a localization (the image/video stays in the Asset Library)",
+          inputSchema: {
+            type: "object",
+            properties: {
+              placementId: { type: "string", description: "The ID of the placement" }
+            },
+            required: ["placementId"]
+          }
+        },
+        {
+          name: "delete_asset_library_media",
+          description: "Delete an image or video from the Asset Library",
+          inputSchema: {
+            type: "object",
+            properties: {
+              imageId: { type: "string", description: "Asset Library image ID" },
+              videoId: { type: "string", description: "Asset Library video ID" }
+            }
           }
         },
 
@@ -1274,6 +1411,31 @@ class AppStoreConnectServer {
           
           case "upload_app_screenshot":
             return formatResponse(await this.screenshotHandlers.uploadAppScreenshot(args as any));
+
+          // Asset Library
+          case "get_asset_library_ref_data":
+            return formatResponse(await this.assetLibraryHandlers.getAssetLibraryRefData(args as any));
+
+          case "list_asset_library_media":
+            return formatResponse(await this.assetLibraryHandlers.listAssetLibraryMedia(args as any));
+
+          case "upload_asset_library_media":
+            return formatResponse(await this.assetLibraryHandlers.uploadAssetLibraryMedia(args as any));
+
+          case "create_asset_placement":
+            return formatResponse(await this.assetLibraryHandlers.createAssetPlacement(args as any));
+
+          case "list_asset_placements":
+            return formatResponse(await this.assetLibraryHandlers.listLocalizationPlacements(args as any));
+
+          case "reorder_asset_placements":
+            return formatResponse(await this.assetLibraryHandlers.reorderAssetPlacements(args as any));
+
+          case "delete_asset_placement":
+            return formatResponse(await this.assetLibraryHandlers.deleteAssetPlacement(args as any));
+
+          case "delete_asset_library_media":
+            return formatResponse(await this.assetLibraryHandlers.deleteAssetLibraryMedia(args as any));
 
           // Bundle IDs
           case "create_bundle_id":

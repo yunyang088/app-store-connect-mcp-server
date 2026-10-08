@@ -17,6 +17,14 @@ import {
 } from '../types/index.js';
 import { validateRequired, sanitizeLimit } from '../utils/index.js';
 
+const EDITABLE_APP_INFO_STATES = [
+  'PREPARE_FOR_SUBMISSION',
+  'DEVELOPER_REJECTED',
+  'REJECTED',
+  'METADATA_REJECTED',
+  'WAITING_FOR_REVIEW'
+];
+
 export class LocalizationHandlers {
   constructor(private client: AppStoreConnectClient) {}
 
@@ -134,7 +142,12 @@ export class LocalizationHandlers {
       { limit: sanitizeLimit(100) }
     );
     
-    const info = infos.data.find(i => i.attributes.state !== 'REPLACED') || infos.data[0];
+    // 有新版本在准备时会同时存在两份 app info：线上那份（READY_FOR_DISTRIBUTION）只读，
+    // 名称/副标题只能改可编辑那份，所以优先取可编辑状态，其次才是任意非 REPLACED
+    const info =
+      infos.data.find(i => EDITABLE_APP_INFO_STATES.includes(i.attributes.state ?? '')) ||
+      infos.data.find(i => i.attributes.state !== 'REPLACED') ||
+      infos.data[0];
     if (!info) {
       throw new Error(`No app info found for app ${appId}`);
     }
@@ -143,14 +156,19 @@ export class LocalizationHandlers {
   }
 
   async listAppInfoLocalizations(args: {
-    appId: string;
+    appId?: string;
+    appInfoId?: string;
     limit?: number;
   }): Promise<ListAppInfoLocalizationsResponse> {
     const { appId, limit = 100 } = args;
     
-    validateRequired(args, ['appId']);
-    
-    const appInfoId = await this.resolveCurrentAppInfoId(appId);
+    let appInfoId = args.appInfoId;
+    if (!appInfoId) {
+      if (!appId) {
+        throw new Error('Either appInfoId or appId is required');
+      }
+      appInfoId = await this.resolveCurrentAppInfoId(appId);
+    }
     
     return this.client.get<ListAppInfoLocalizationsResponse>(
       `/appInfos/${appInfoId}/appInfoLocalizations`,

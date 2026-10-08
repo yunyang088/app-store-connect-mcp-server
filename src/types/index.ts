@@ -24,3 +24,5 @@ export * from './screenshots.js';
 
 // Localization types
 export * from './localizations.js';
+// Asset Library types
+export * from './assets.js';
