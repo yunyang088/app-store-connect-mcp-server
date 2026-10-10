@@ -155,10 +155,6 @@ export class LocalizationHandlers {
     );
   }
 
-  private async resolveCurrentAppInfoId(appId: string): Promise<string> {
-    return resolveEditableAppInfoId(this.client, appId);
-  }
-
   async listAppInfoLocalizations(args: {
     appId?: string;
     appInfoId?: string;
@@ -171,7 +167,7 @@ export class LocalizationHandlers {
       if (!appId) {
         throw new Error('Either appInfoId or appId is required');
       }
-      appInfoId = await this.resolveCurrentAppInfoId(appId);
+      appInfoId = await resolveEditableAppInfoId(this.client, appId);
     }
     
     return this.client.get<ListAppInfoLocalizationsResponse>(
@@ -199,7 +195,7 @@ export class LocalizationHandlers {
       if (!args.appId) {
         throw new Error('Either appInfoId or appId is required');
       }
-      appInfoId = await this.resolveCurrentAppInfoId(args.appId);
+      appInfoId = await resolveEditableAppInfoId(this.client, args.appId);
     }
     
     const requestData: AppInfoLocalizationCreateRequest = {

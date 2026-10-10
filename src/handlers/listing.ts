@@ -8,7 +8,7 @@ import {
   ListTerritoriesResponse,
   TerritoryAvailabilityAttributes
 } from '../types/index.js';
-import { validateRequired } from '../utils/index.js';
+import { validateRequired, fetchAllPages, fetchAllTerritoryIds, resolveTerritoryIds } from '../utils/index.js';
 import { resolveEditableAppInfoId } from './localizations.js';
 
 const CATEGORY_RELATIONSHIPS: (keyof AppCategoryRelationships)[] = [
@@ -30,45 +30,6 @@ const REVIEW_DETAIL_FIELDS: (keyof AppStoreReviewDetailAttributes)[] = [
   'demoAccountRequired',
   'notes'
 ];
-
-// 顺着 links.next 把分页取完（next 是绝对地址，已带上原来的查询参数）
-export async function fetchAllPages<T extends { data: any[]; included?: any[]; links?: { next?: string } }>(
-  client: AppStoreConnectClient,
-  url: string,
-  params?: Record<string, any>,
-  maxPages = 20
-): Promise<T> {
-  const first = await client.get<T>(url, params);
-  let next = first.links?.next;
-  for (let page = 1; next && page < maxPages; page++) {
-    const res = await client.get<T>(next);
-    first.data.push(...res.data);
-    if (res.included?.length) {
-      first.included = [...(first.included ?? []), ...res.included];
-    }
-    next = res.links?.next;
-  }
-  return first;
-}
-
-export async function fetchAllTerritoryIds(client: AppStoreConnectClient): Promise<string[]> {
-  const res = await fetchAllPages<ListTerritoriesResponse>(client, '/territories', { limit: 200 });
-  return res.data.map((t) => t.id);
-}
-
-// 显式给出地区列表就用它，否则取全部地区；两种情况都再去掉 excludeTerritoryIds（如 CHN）
-export async function resolveTerritoryIds(
-  client: AppStoreConnectClient,
-  territoryIds?: string[],
-  excludeTerritoryIds?: string[]
-): Promise<string[]> {
-  if (!territoryIds?.length && excludeTerritoryIds === undefined) {
-    throw new Error('Provide territoryIds, or excludeTerritoryIds (pass [] to select all territories)');
-  }
-  const base = territoryIds?.length ? territoryIds : await fetchAllTerritoryIds(client);
-  const excluded = new Set(excludeTerritoryIds ?? []);
-  return base.filter((id) => !excluded.has(id));
-}
 
 const pick = <T extends object>(source: T, keys: (keyof T)[]): Partial<T> =>
   Object.fromEntries(keys.filter((k) => source[k] !== undefined).map((k) => [k, source[k]])) as Partial<T>;
@@ -160,11 +121,15 @@ export class ListingHandlers {
   }): Promise<Record<string, string | null>> {
     const appInfoId = await this.resolveAppInfoId(args);
 
-    // 传 null 表示清空该分类
+    // 只有 null 表示清空该分类；空字符串多半是调用方想表达"不改"，直接拒绝，免得误删
+    const empty = CATEGORY_RELATIONSHIPS.filter((r) => args[r] === '');
+    if (empty.length) {
+      throw new Error(`${empty.join(', ')}: pass a category ID, or null to clear it (empty string is not allowed)`);
+    }
     const relationships = Object.fromEntries(
       CATEGORY_RELATIONSHIPS.filter((r) => args[r] !== undefined).map((r) => [
         r,
-        { data: args[r] ? { type: 'appCategories', id: args[r] } : null }
+        { data: args[r] === null ? null : { type: 'appCategories', id: args[r] } }
       ])
     );
     if (!Object.keys(relationships).length) {
@@ -282,7 +247,7 @@ export class ListingHandlers {
     validateRequired(args, ['appId']);
 
     const schedule = await this.client.get<JsonApiSingleResponse>(`/apps/${appId}/appPriceSchedule`, { include: 'baseTerritory' });
-    const manual = await this.client.get<JsonApiListResponse>(`/appPriceSchedules/${schedule.data.id}/manualPrices`, {
+    const manual = await fetchAllPages<JsonApiListResponse>(this.client, `/appPriceSchedules/${schedule.data.id}/manualPrices`, {
       include: 'appPricePoint,territory',
       'fields[appPricePoints]': 'customerPrice,proceeds',
       limit: 200,
@@ -408,11 +373,7 @@ export class ListingHandlers {
 
     // 每个地区都显式给出 available，未选中的地区（如 CHN）标为 false
     const allIds = await fetchAllTerritoryIds(this.client);
-    const available = new Set(await resolveTerritoryIds(this.client, territoryIds, excludeTerritoryIds));
-    const unknown = [...available].filter((id) => !allIds.includes(id));
-    if (unknown.length) {
-      throw new Error(`Unknown territory IDs: ${unknown.join(', ')}`);
-    }
+    const available = new Set(await resolveTerritoryIds(this.client, territoryIds, excludeTerritoryIds, allIds));
 
     const localId = (territory: string) => `\${territory-${territory}}`;
     return this.client.post<JsonApiSingleResponse>(`${API_V2_BASE}/appAvailabilities`, {

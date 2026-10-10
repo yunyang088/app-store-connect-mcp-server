@@ -91,7 +91,7 @@ class AppStoreConnectServer {
   constructor() {
     this.server = new Server({
       name: "appstore-connect-server",
-      version: "1.3.0"
+      version: "1.3.1"
     }, {
       capabilities: {
         tools: {}
@@ -990,7 +990,7 @@ class AppStoreConnectServer {
               inAppPurchaseId: { type: "string", description: "The ID of the in-app purchase" },
               territory: { type: "string", description: "Territory ID (default: USA)" },
               customerPrice: { type: "string", description: "Only return the price point with this customer price, e.g. '0.99' (optional)" },
-              limit: { type: "number", description: "Maximum number to fetch (default: 8000)", minimum: 1, maximum: 8000 }
+              limit: { type: "number", description: "Maximum number of price points to return after the customerPrice filter (default: all). All price points are always fetched; count is the total and truncated tells whether the list was cut", minimum: 1 }
             },
             required: ["inAppPurchaseId"]
           }
@@ -1054,7 +1054,7 @@ class AppStoreConnectServer {
             properties: {
               inAppPurchaseId: { type: "string", description: "The ID of the in-app purchase" },
               filePath: { type: "string", description: "Absolute path to the local image" },
-              replaceExisting: { type: "boolean", description: "Delete the existing review screenshot first (default: false)" },
+              replaceExisting: { type: "boolean", description: "Delete the existing review screenshot first (default: false). Apple allows only one, so the old one is gone even if the new upload then fails" },
               waitForProcessing: { type: "boolean", description: "Poll until processing finishes (default: true)" }
             },
             required: ["inAppPurchaseId", "filePath"]
@@ -1118,7 +1118,7 @@ class AppStoreConnectServer {
         },
         {
           name: "update_app_info_categories",
-          description: "Set the app's categories on its editable app info. Pass category IDs from list_app_categories; pass null to clear one (standard JSON:API, not declared in Apple's schema). Games use primaryCategory GAMES plus up to two GAMES_* subcategories.",
+          description: "Set the app's categories on its editable app info. Pass category IDs from list_app_categories; pass null to clear one (standard JSON:API, not declared in Apple's schema); an empty string is rejected. Games use primaryCategory GAMES plus up to two GAMES_* subcategories.",
           inputSchema: {
             type: "object",
             properties: {

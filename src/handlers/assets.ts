@@ -1,4 +1,3 @@
-import axios from 'axios';
 import { readFile } from 'fs/promises';
 import path from 'path';
 import { AppStoreConnectClient } from '../services/index.js';
@@ -10,17 +9,15 @@ import {
   AssetLibraryPlacementsResponse,
   AssetLibraryRefDataResponse,
   AssetLibraryVideoResponse,
-  AssetPlacementType,
-  UploadOperation
+  AssetPlacementType
 } from '../types/index.js';
-import { validateRequired, sanitizeLimit } from '../utils/index.js';
+import { validateRequired, sanitizeLimit, sleep, uploadChunks } from '../utils/index.js';
 
 const VIDEO_EXTENSIONS = ['.mov', '.m4v', '.mp4'];
 // 上传后服务端异步处理（校验尺寸/格式），这些状态表示还没出结果；
 // COMPLETE 是上传完成但尚未匹配规格（specId 为空），随后才变为 PREPARE_FOR_SUBMISSION 或 FAILED
 const PROCESSING_STATES = ['AWAITING_UPLOAD', 'UPLOAD_COMPLETE', 'COMPLETE'];
 
-const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
 
 // Asset Library（iOS 27 起的素材库）：截图、预览视频、产品页头图、搜索结果素材、In-App Event 素材
 // 统一走「上传到素材库 → 创建 placement 挂到本地化」两步
@@ -112,7 +109,7 @@ export class AssetLibraryHandlers {
     const id = created.data.id;
 
     // 2. 按 uploadOperations 分片上传
-    await this.uploadChunks(created.data.attributes.uploadOperations ?? [], buf);
+    await uploadChunks(created.data.attributes.uploadOperations ?? [], buf);
 
     // 3. 标记上传完成（素材库不需要 md5 校验和）
     let result = await this.client.patch<AssetLibraryImageResponse>(`/${type}/${id}`, {
@@ -127,23 +124,6 @@ export class AssetLibraryHandlers {
       }
     }
     return result;
-  }
-
-  private async uploadChunks(operations: UploadOperation[], buf: Buffer): Promise<void> {
-    for (const op of operations) {
-      const headers: Record<string, string> = {};
-      for (const h of op.requestHeaders ?? []) {
-        headers[h.name] = h.value;
-      }
-      await axios.request({
-        method: op.method,
-        url: op.url,
-        headers,
-        data: buf.subarray(op.offset, op.offset + op.length),
-        maxBodyLength: Infinity,
-        maxContentLength: Infinity
-      });
-    }
   }
 
   async createAssetPlacement(args: {

@@ -1,4 +1,3 @@
-import axios from 'axios';
 import { readFile } from 'fs/promises';
 import { createHash } from 'crypto';
 import path from 'path';
@@ -12,7 +11,7 @@ import {
   AppScreenshotCreateRequest,
   AppScreenshotUpdateRequest
 } from '../types/index.js';
-import { validateRequired, sanitizeLimit } from '../utils/index.js';
+import { validateRequired, sanitizeLimit, uploadChunks } from '../utils/index.js';
 
 export class ScreenshotHandlers {
   constructor(private client: AppStoreConnectClient) {}
@@ -123,21 +122,7 @@ export class ScreenshotHandlers {
 
     // Step 2: upload each chunk using the returned upload operations
     const uploadOperations = shot.attributes.uploadOperations ?? [];
-    for (const op of uploadOperations) {
-      const headers: Record<string, string> = {};
-      for (const h of op.requestHeaders ?? []) {
-        headers[h.name] = h.value;
-      }
-
-      await axios.request({
-        method: op.method,
-        url: op.url,
-        headers,
-        data: buf.subarray(op.offset, op.offset + op.length),
-        maxBodyLength: Infinity,
-        maxContentLength: Infinity
-      });
-    }
+    await uploadChunks(uploadOperations, buf);
 
     // Step 3: mark the screenshot as uploaded with its md5 checksum
     const updateRequest: AppScreenshotUpdateRequest = {

@@ -19,13 +19,13 @@ import {
   ListInAppPurchaseLocalizationsResponse,
   ListInAppPurchasePricePointsResponse,
   ListInAppPurchasesResponse,
-  ListInAppPurchaseVersionsResponse,
-  UploadOperation
+  ListInAppPurchaseVersionsResponse
 } from '../types/index.js';
-import { validateRequired, sanitizeLimit } from '../utils/index.js';
-import { fetchAllPages, resolveTerritoryIds } from './listing.js';
+import { validateRequired, sanitizeLimit, fetchAllPages, resolveTerritoryIds, sleep, uploadChunks } from '../utils/index.js';
 
-const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
+const isPngOrJpeg = (buf: Buffer) =>
+  (buf.length >= 8 && buf.readUInt32BE(0) === 0x89504e47 && buf.readUInt32BE(4) === 0x0d0a1a0a) ||
+  (buf.length >= 3 && buf[0] === 0xff && buf[1] === 0xd8 && buf[2] === 0xff);
 
 // 审核截图提交后服务端异步处理，这两个状态表示还没出结果
 const SCREENSHOT_PROCESSING_STATES = ['AWAITING_UPLOAD', 'UPLOAD_COMPLETE'];
@@ -301,8 +301,8 @@ export class InAppPurchaseHandlers {
     territory?: string;
     customerPrice?: string;
     limit?: number;
-  }): Promise<{ inAppPurchaseId: string; territory: string; count: number; pricePoints: CompactPricePoint[] }> {
-    const { inAppPurchaseId, territory = 'USA', customerPrice, limit = 8000 } = args;
+  }): Promise<{ inAppPurchaseId: string; territory: string; count: number; truncated: boolean; pricePoints: CompactPricePoint[] }> {
+    const { inAppPurchaseId, territory = 'USA', customerPrice, limit } = args;
     validateRequired(args, ['inAppPurchaseId']);
 
     const res = await fetchAllPages<ListInAppPurchasePricePointsResponse>(
@@ -313,7 +313,8 @@ export class InAppPurchaseHandlers {
         include: 'territory',
         'fields[inAppPurchasePricePoints]': 'customerPrice,proceeds,territory',
         'fields[territories]': 'currency',
-        limit: sanitizeLimit(limit, 8000)
+        // 每页取到上限，一个地区的全部价格点（约 800 个）一页就能取完；limit 只控制返回条数
+        limit: 8000
       }
     );
 
@@ -332,7 +333,11 @@ export class InAppPurchaseHandlers {
       // 数值比较，"0.99" 和 "0.990" 都能匹配
       pricePoints = pricePoints.filter((p) => Number(p.customerPrice) === Number(customerPrice));
     }
-    return { inAppPurchaseId, territory, count: pricePoints.length, pricePoints };
+    const count = pricePoints.length;
+    if (limit !== undefined) {
+      pricePoints = pricePoints.slice(0, Math.max(1, Number(limit)));
+    }
+    return { inAppPurchaseId, territory, count, truncated: pricePoints.length < count, pricePoints };
   }
 
   async setInAppPurchasePrice(args: {
@@ -404,10 +409,10 @@ export class InAppPurchaseHandlers {
       ...(territory && { 'filter[territory]': territory })
     };
 
-    const manual = await this.client.get<JsonApiListResponse>(`/inAppPurchasePriceSchedules/${scheduleId}/manualPrices`, priceParams);
+    const manual = await fetchAllPages<JsonApiListResponse>(this.client, `/inAppPurchasePriceSchedules/${scheduleId}/manualPrices`, priceParams);
     // 自动价格是按基准地区换算出的其他地区价格，有 175 个地区，只在指定 territory 时才查
     const automatic = territory
-      ? await this.client.get<JsonApiListResponse>(`/inAppPurchasePriceSchedules/${scheduleId}/automaticPrices`, priceParams)
+      ? await fetchAllPages<JsonApiListResponse>(this.client, `/inAppPurchasePriceSchedules/${scheduleId}/automaticPrices`, priceParams)
       : undefined;
 
     return {
@@ -477,8 +482,13 @@ export class InAppPurchaseHandlers {
 
     const buf = await readFile(filePath);
     const fileName = path.basename(filePath);
+    // 先在本地确认格式：替换时要先删旧图，新图格式不对时不能等删完才发现
+    if (!isPngOrJpeg(buf)) {
+      throw new Error(`${fileName} is not a PNG or JPEG image`);
+    }
 
-    // 每个内购只能有一张审核截图；已有时按需先删掉旧的
+    // 每个内购只能有一张审核截图，所以替换时只能先删旧的再传新的
+    let deletedId: string | undefined;
     if (replaceExisting) {
       const existing = await this.client
         .get<{ data: { id: string } | null }>(`${API_V2_BASE}/inAppPurchases/${inAppPurchaseId}/appStoreReviewScreenshot`)
@@ -488,9 +498,27 @@ export class InAppPurchaseHandlers {
         });
       if (existing.data?.id) {
         await this.client.delete(`/inAppPurchaseAppStoreReviewScreenshots/${existing.data.id}`);
+        deletedId = existing.data.id;
       }
     }
 
+    try {
+      return await this.reserveUploadCommit(inAppPurchaseId, buf, fileName, waitForProcessing);
+    } catch (e: any) {
+      // 旧图已删、新图没传上：明确告诉调用方内购现在没有审核截图，需要重新上传
+      if (deletedId) {
+        e.message = `Previous review screenshot ${deletedId} was already deleted, and uploading the new one failed, so the in-app purchase has no review screenshot now. Re-run the upload. Cause: ${e.message}`;
+      }
+      throw e;
+    }
+  }
+
+  private async reserveUploadCommit(
+    inAppPurchaseId: string,
+    buf: Buffer,
+    fileName: string,
+    waitForProcessing: boolean
+  ): Promise<InAppPurchaseAppStoreReviewScreenshotResponse> {
     // 1. 预留截图，拿到分片上传地址
     const created = await this.client.post<InAppPurchaseAppStoreReviewScreenshotResponse>('/inAppPurchaseAppStoreReviewScreenshots', {
       data: {
@@ -504,7 +532,7 @@ export class InAppPurchaseHandlers {
     const id = created.data.id;
 
     // 2. 按 uploadOperations 分片上传
-    await this.uploadChunks(created.data.attributes.uploadOperations ?? [], buf);
+    await uploadChunks(created.data.attributes.uploadOperations ?? [], buf);
 
     // 3. 提交：标记已上传并带上 md5
     let result = await this.client.patch<InAppPurchaseAppStoreReviewScreenshotResponse>(`/inAppPurchaseAppStoreReviewScreenshots/${id}`, {
@@ -526,22 +554,5 @@ export class InAppPurchaseHandlers {
       }
     }
     return result;
-  }
-
-  private async uploadChunks(operations: UploadOperation[], buf: Buffer): Promise<void> {
-    for (const op of operations) {
-      const headers: Record<string, string> = {};
-      for (const h of op.requestHeaders ?? []) {
-        headers[h.name] = h.value;
-      }
-      await axios.request({
-        method: op.method,
-        url: op.url,
-        headers,
-        data: buf.subarray(op.offset, op.offset + op.length),
-        maxBodyLength: Infinity,
-        maxContentLength: Infinity
-      });
-    }
   }
 }
