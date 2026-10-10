@@ -25,6 +25,25 @@ const EDITABLE_APP_INFO_STATES = [
   'WAITING_FOR_REVIEW'
 ];
 
+// 有新版本在准备时会同时存在两份 app info：线上那份（READY_FOR_DISTRIBUTION）只读，
+// 名称/副标题/分类/年龄分级只能改可编辑那份，所以优先取可编辑状态，其次才是任意非 REPLACED
+export async function resolveEditableAppInfoId(client: AppStoreConnectClient, appId: string): Promise<string> {
+  const infos = await client.get<ListAppInfosResponse>(
+    `/apps/${appId}/appInfos`,
+    { limit: sanitizeLimit(100) }
+  );
+
+  const info =
+    infos.data.find(i => EDITABLE_APP_INFO_STATES.includes(i.attributes.state ?? '')) ||
+    infos.data.find(i => i.attributes.state !== 'REPLACED') ||
+    infos.data[0];
+  if (!info) {
+    throw new Error(`No app info found for app ${appId}`);
+  }
+
+  return info.id;
+}
+
 export class LocalizationHandlers {
   constructor(private client: AppStoreConnectClient) {}
 
@@ -137,22 +156,7 @@ export class LocalizationHandlers {
   }
 
   private async resolveCurrentAppInfoId(appId: string): Promise<string> {
-    const infos = await this.client.get<ListAppInfosResponse>(
-      `/apps/${appId}/appInfos`,
-      { limit: sanitizeLimit(100) }
-    );
-    
-    // 有新版本在准备时会同时存在两份 app info：线上那份（READY_FOR_DISTRIBUTION）只读，
-    // 名称/副标题只能改可编辑那份，所以优先取可编辑状态，其次才是任意非 REPLACED
-    const info =
-      infos.data.find(i => EDITABLE_APP_INFO_STATES.includes(i.attributes.state ?? '')) ||
-      infos.data.find(i => i.attributes.state !== 'REPLACED') ||
-      infos.data[0];
-    if (!info) {
-      throw new Error(`No app info found for app ${appId}`);
-    }
-    
-    return info.id;
+    return resolveEditableAppInfoId(this.client, appId);
   }
 
   async listAppInfoLocalizations(args: {

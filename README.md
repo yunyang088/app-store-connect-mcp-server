@@ -1,6 +1,6 @@
 # App Store Connect MCP Server
 
-A [Model Context Protocol](https://modelcontextprotocol.io) server for the [App Store Connect API](https://developer.apple.com/documentation/appstoreconnectapi). It lets AI assistants manage apps, versions, localizations, screenshots, creative assets, TestFlight, bundle IDs, devices, users, and analytics reports.
+A [Model Context Protocol](https://modelcontextprotocol.io) server for the [App Store Connect API](https://developer.apple.com/documentation/appstoreconnectapi). It lets AI assistants manage apps, versions, localizations, screenshots, creative assets, in-app purchases, pricing and availability, App Review details, TestFlight, bundle IDs, devices, users, and analytics reports.
 
 [![npm](https://img.shields.io/npm/v/@yunyang088/app-store-connect-mcp-server)](https://www.npmjs.com/package/@yunyang088/app-store-connect-mcp-server)
 
@@ -46,11 +46,17 @@ claude mcp add app-store-connect \
 | Area | Tools |
 | --- | --- |
 | Apps | `list_apps`, `get_app_info` |
-| Versions | `create_app_store_version`, `list_app_store_versions` |
+| Versions | `create_app_store_version`, `list_app_store_versions`, `update_app_store_version`, `set_app_store_version_build` |
 | Version localizations | `list_app_store_version_localizations`, `get_app_store_version_localization`, `create_app_store_version_localization`, `update_app_store_version_localization` |
 | App info localizations (name / subtitle) | `list_app_info_localizations`, `create_app_info_localization`, `update_app_info_localization` |
 | Screenshots | `list_app_screenshot_sets`, `create_app_screenshot_set`, `list_app_screenshots`, `upload_app_screenshot`, `delete_app_screenshot` |
 | Asset Library (iOS 27 creative assets, iPhone Duo) | `get_asset_library_ref_data`, `list_asset_library_media`, `upload_asset_library_media`, `create_asset_placement`, `list_asset_placements`, `reorder_asset_placements`, `delete_asset_placement`, `delete_asset_library_media` |
+| In-app purchases | `list_in_app_purchases`, `get_in_app_purchase`, `create_in_app_purchase`, `update_in_app_purchase`, `delete_in_app_purchase`, `list_in_app_purchase_versions`, `create_in_app_purchase_version` |
+| In-app purchase localizations | `list_in_app_purchase_localizations`, `create_in_app_purchase_localization`, `update_in_app_purchase_localization`, `delete_in_app_purchase_localization` |
+| In-app purchase price, availability & review | `list_in_app_purchase_price_points`, `set_in_app_purchase_price`, `get_in_app_purchase_price_schedule`, `get_in_app_purchase_availability`, `set_in_app_purchase_availability`, `upload_in_app_purchase_review_screenshot` |
+| App Review information | `get_app_store_review_detail`, `create_app_store_review_detail`, `update_app_store_review_detail` |
+| Age rating & categories | `get_age_rating_declaration`, `update_age_rating_declaration`, `list_app_categories`, `get_app_info_categories`, `update_app_info_categories` |
+| App price & availability | `list_territories`, `list_app_price_points`, `get_app_price_schedule`, `set_app_price_schedule`, `get_app_availability`, `set_app_availability`, `update_territory_availability` |
 | TestFlight | `list_beta_groups`, `list_group_testers`, `add_tester_to_group`, `remove_tester_from_group`, `list_beta_feedback_screenshots`, `get_beta_feedback_screenshot` |
 | Bundle IDs | `list_bundle_ids`, `get_bundle_id_info`, `create_bundle_id`, `enable_bundle_capability`, `disable_bundle_capability` |
 | Devices & users | `list_devices`, `list_users` |
@@ -67,6 +73,13 @@ Notes:
   - iPhone Duo screenshots have no legacy `screenshotDisplayType`; upload with category `APP_SCREENSHOTS_AND_PREVIEWS` and place as `APP_SCREENSHOT` in group `IPHONE_DUO_PROFILE` (2853×2007 / 2034×1398, or portrait).
   - `get_asset_library_ref_data` returns the live specs and placement groups.
 - When a new version is being prepared, the app has two app infos (live and editable). App info localization tools now resolve the editable one, so name/subtitle edits go to the version being prepared.
+- In-app purchase flow: `create_in_app_purchase` → `create_in_app_purchase_localization` per locale → `list_in_app_purchase_price_points` (e.g. `territory: USA`, `customerPrice: "0.99"`) → `set_in_app_purchase_price` → `set_in_app_purchase_availability` → `upload_in_app_purchase_review_screenshot`.
+  - Since API 4.4.1, localizations belong to an in-app purchase *version*. A new in-app purchase comes with version 1 in `PREPARE_FOR_SUBMISSION`; given only `inAppPurchaseId`, the localization tool posts to that draft version (v2) and falls back to the deprecated v1 endpoint if there is none. Update/delete try v2 first and fall back to v1 on 404.
+  - Price and availability tools replace the whole schedule / territory list. `excludeTerritoryIds: ["CHN"]` selects every territory except mainland China.
+  - The first in-app purchase of an app has to be submitted together with an app version on the App Store Connect website; there is no submission tool here.
+- `set_app_availability` creates the app's availability once (`POST /v2/appAvailabilities`, every territory listed with `available` true/false). After it exists, use `update_territory_availability` with IDs from `get_app_availability`.
+- `set_app_price_schedule` with `free: true` looks up the 0.00 price point in the base territory (default `USA`).
+- Age rating and category tools resolve the app's editable app info when given `appId`.
 - Analytics flow: request → reports → instances → segments → download. Only one `ONGOING` request is allowed per app.
 
 ## Development

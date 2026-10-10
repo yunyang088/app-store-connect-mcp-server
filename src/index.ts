@@ -22,7 +22,9 @@ import {
   XcodeHandlers,
   LocalizationHandlers,
   ScreenshotHandlers,
-  AssetLibraryHandlers
+  AssetLibraryHandlers,
+  InAppPurchaseHandlers,
+  ListingHandlers
 } from './handlers/index.js';
 
 const ASSET_PLACEMENT_TYPES = [
@@ -37,6 +39,30 @@ const ASSET_PLACEMENT_TYPES = [
   "EVENT_DETAILS_PAGE_ASSET",
   "RETENTION_MESSAGE_ASSET"
 ];
+
+const IAP_TYPES = ["CONSUMABLE", "NON_CONSUMABLE", "NON_RENEWING_SUBSCRIPTION"];
+
+const IAP_STATES = [
+  "MISSING_METADATA", "WAITING_FOR_UPLOAD", "PROCESSING_CONTENT", "READY_TO_SUBMIT",
+  "WAITING_FOR_REVIEW", "IN_REVIEW", "DEVELOPER_ACTION_NEEDED", "PENDING_BINARY_APPROVAL",
+  "APPROVED", "DEVELOPER_REMOVED_FROM_SALE", "REMOVED_FROM_SALE", "REJECTED"
+];
+
+const IAP_INCLUDES = [
+  "inAppPurchaseLocalizations", "pricePoints", "content", "appStoreReviewScreenshot",
+  "promotedPurchase", "iapPriceSchedule", "inAppPurchaseAvailability", "images", "offerCodes", "versions"
+];
+
+const REVIEW_DETAIL_PROPERTIES = {
+  contactFirstName: { type: "string", description: "Contact first name" },
+  contactLastName: { type: "string", description: "Contact last name" },
+  contactPhone: { type: "string", description: "Contact phone, with country code, e.g. +1 555 0100" },
+  contactEmail: { type: "string", description: "Contact email" },
+  demoAccountRequired: { type: "boolean", description: "Whether App Review needs a demo account to sign in" },
+  demoAccountName: { type: "string", description: "Demo account user name" },
+  demoAccountPassword: { type: "string", description: "Demo account password" },
+  notes: { type: "string", description: "Notes for App Review" }
+};
 
 // Load environment variables
 const config: AppStoreConnectConfig = {
@@ -59,11 +85,13 @@ class AppStoreConnectServer {
   private localizationHandlers: LocalizationHandlers;
   private screenshotHandlers: ScreenshotHandlers;
   private assetLibraryHandlers: AssetLibraryHandlers;
+  private inAppPurchaseHandlers: InAppPurchaseHandlers;
+  private listingHandlers: ListingHandlers;
 
   constructor() {
     this.server = new Server({
       name: "appstore-connect-server",
-      version: "1.2.0"
+      version: "1.3.0"
     }, {
       capabilities: {
         tools: {}
@@ -81,6 +109,8 @@ class AppStoreConnectServer {
     this.localizationHandlers = new LocalizationHandlers(this.client);
     this.screenshotHandlers = new ScreenshotHandlers(this.client);
     this.assetLibraryHandlers = new AssetLibraryHandlers(this.client);
+    this.inAppPurchaseHandlers = new InAppPurchaseHandlers(this.client);
+    this.listingHandlers = new ListingHandlers(this.client);
 
     this.setupHandlers();
   }
@@ -805,6 +835,448 @@ class AppStoreConnectServer {
           }
         },
 
+        // In-App Purchase Tools (inAppPurchasesV2)
+        {
+          name: "list_in_app_purchases",
+          description: "List an app's in-app purchases (consumable, non-consumable, non-renewing subscription) with optional filters",
+          inputSchema: {
+            type: "object",
+            properties: {
+              appId: { type: "string", description: "The ID of the app" },
+              productId: { type: "string", description: "Filter by product ID (optional)" },
+              name: { type: "string", description: "Filter by reference name (optional)" },
+              state: { type: "string", enum: IAP_STATES, description: "Filter by state (optional)" },
+              inAppPurchaseType: { type: "string", enum: IAP_TYPES, description: "Filter by type (optional)" },
+              include: { type: "array", items: { type: "string", enum: IAP_INCLUDES.filter((i) => i !== "pricePoints") }, description: "Related resources to include (optional; without it only attributes are returned)" },
+              limit: { type: "number", description: "Maximum number to return (default: 100)", minimum: 1, maximum: 200 }
+            },
+            required: ["appId"]
+          }
+        },
+        {
+          name: "get_in_app_purchase",
+          description: "Get one in-app purchase, optionally including related resources (versions, localizations, price schedule, availability, review screenshot, ...)",
+          inputSchema: {
+            type: "object",
+            properties: {
+              inAppPurchaseId: { type: "string", description: "The ID of the in-app purchase" },
+              include: { type: "array", items: { type: "string", enum: IAP_INCLUDES }, description: "Related resources to include (optional)" }
+            },
+            required: ["inAppPurchaseId"]
+          }
+        },
+        {
+          name: "create_in_app_purchase",
+          description: "Create an in-app purchase. A draft version 1 (PREPARE_FOR_SUBMISSION) is created with it; then add localizations, a price, availability and a review screenshot. The first in-app purchase of an app must be submitted together with an app version on the App Store Connect website.",
+          inputSchema: {
+            type: "object",
+            properties: {
+              appId: { type: "string", description: "The ID of the app" },
+              name: { type: "string", description: "Reference name (internal, not shown to customers)" },
+              productId: { type: "string", description: "Product ID used by StoreKit, e.g. com.example.app.coffee10 (cannot be changed or reused)" },
+              inAppPurchaseType: { type: "string", enum: IAP_TYPES, description: "Type of in-app purchase" },
+              reviewNote: { type: "string", description: "Notes for App Review (optional)" },
+              familySharable: { type: "boolean", description: "Enable Family Sharing (optional; non-consumables only)" }
+            },
+            required: ["appId", "name", "productId", "inAppPurchaseType"]
+          }
+        },
+        {
+          name: "update_in_app_purchase",
+          description: "Update an in-app purchase's reference name, review note or Family Sharing",
+          inputSchema: {
+            type: "object",
+            properties: {
+              inAppPurchaseId: { type: "string", description: "The ID of the in-app purchase" },
+              name: { type: "string", description: "New reference name (optional)" },
+              reviewNote: { type: "string", description: "New review note (optional)" },
+              familySharable: { type: "boolean", description: "Family Sharing (optional; non-consumables only, cannot be turned off once on)" }
+            },
+            required: ["inAppPurchaseId"]
+          }
+        },
+        {
+          name: "delete_in_app_purchase",
+          description: "Delete an in-app purchase that has not been submitted (its product ID can never be reused)",
+          inputSchema: {
+            type: "object",
+            properties: {
+              inAppPurchaseId: { type: "string", description: "The ID of the in-app purchase" }
+            },
+            required: ["inAppPurchaseId"]
+          }
+        },
+        {
+          name: "list_in_app_purchase_versions",
+          description: "List an in-app purchase's metadata versions (API 4.4.1+). Localizations attach to the version in PREPARE_FOR_SUBMISSION.",
+          inputSchema: {
+            type: "object",
+            properties: {
+              inAppPurchaseId: { type: "string", description: "The ID of the in-app purchase" },
+              state: { type: "string", enum: ["PREPARE_FOR_SUBMISSION", "READY_FOR_REVIEW", "WAITING_FOR_REVIEW", "IN_REVIEW", "ACCEPTED", "APPROVED", "REPLACED_WITH_NEW_VERSION", "REJECTED", "DEVELOPER_REJECTED"], description: "Filter by state (optional)" },
+              includeLocalizations: { type: "boolean", description: "Include localization IDs (default: true)" }
+            },
+            required: ["inAppPurchaseId"]
+          }
+        },
+        {
+          name: "create_in_app_purchase_version",
+          description: "Create a new draft metadata version for an in-app purchase (needed to change localizations after a version was approved)",
+          inputSchema: {
+            type: "object",
+            properties: {
+              inAppPurchaseId: { type: "string", description: "The ID of the in-app purchase" }
+            },
+            required: ["inAppPurchaseId"]
+          }
+        },
+        {
+          name: "list_in_app_purchase_localizations",
+          description: "List in-app purchase localizations (display name + description) for a version, or for the in-app purchase itself (legacy endpoint)",
+          inputSchema: {
+            type: "object",
+            properties: {
+              inAppPurchaseVersionId: { type: "string", description: "The ID of the in-app purchase version" },
+              inAppPurchaseId: { type: "string", description: "The ID of the in-app purchase (legacy, deprecated endpoint)" },
+              limit: { type: "number", description: "Maximum number to return (default: 100)", minimum: 1, maximum: 200 }
+            }
+          }
+        },
+        {
+          name: "create_in_app_purchase_localization",
+          description: "Add a localized display name and description to an in-app purchase. Given inAppPurchaseVersionId, posts to that version (v2). Given only inAppPurchaseId, uses its PREPARE_FOR_SUBMISSION version, or falls back to the legacy v1 endpoint if there is none. Display name max 35 chars, description max 55 chars.",
+          inputSchema: {
+            type: "object",
+            properties: {
+              inAppPurchaseVersionId: { type: "string", description: "The ID of the in-app purchase version (preferred)" },
+              inAppPurchaseId: { type: "string", description: "The ID of the in-app purchase (draft version resolved automatically)" },
+              locale: { type: "string", description: "Locale, e.g. en-US, ja, ko, zh-Hant, zh-Hans" },
+              name: { type: "string", description: "Display name shown to customers" },
+              description: { type: "string", description: "Description shown to customers (optional)" }
+            },
+            required: ["locale", "name"]
+          }
+        },
+        {
+          name: "update_in_app_purchase_localization",
+          description: "Update an in-app purchase localization's display name and/or description",
+          inputSchema: {
+            type: "object",
+            properties: {
+              localizationId: { type: "string", description: "The ID of the in-app purchase localization" },
+              name: { type: "string", description: "New display name (optional)" },
+              description: { type: "string", description: "New description (optional)" }
+            },
+            required: ["localizationId"]
+          }
+        },
+        {
+          name: "delete_in_app_purchase_localization",
+          description: "Delete an in-app purchase localization",
+          inputSchema: {
+            type: "object",
+            properties: {
+              localizationId: { type: "string", description: "The ID of the in-app purchase localization" }
+            },
+            required: ["localizationId"]
+          }
+        },
+        {
+          name: "list_in_app_purchase_price_points",
+          description: "List the price points available to an in-app purchase in one territory, compacted to id + customerPrice + proceeds + territory + currency. Use customerPrice to find a single point, e.g. territory USA + customerPrice 0.99; pass its id to set_in_app_purchase_price.",
+          inputSchema: {
+            type: "object",
+            properties: {
+              inAppPurchaseId: { type: "string", description: "The ID of the in-app purchase" },
+              territory: { type: "string", description: "Territory ID (default: USA)" },
+              customerPrice: { type: "string", description: "Only return the price point with this customer price, e.g. '0.99' (optional)" },
+              limit: { type: "number", description: "Maximum number to fetch (default: 8000)", minimum: 1, maximum: 8000 }
+            },
+            required: ["inAppPurchaseId"]
+          }
+        },
+        {
+          name: "set_in_app_purchase_price",
+          description: "Set an in-app purchase's price schedule: one manual price in the base territory (other territories are equalized automatically by Apple). Replaces the existing schedule. Price increases on a live product cannot be undone.",
+          inputSchema: {
+            type: "object",
+            properties: {
+              inAppPurchaseId: { type: "string", description: "The ID of the in-app purchase" },
+              pricePointId: { type: "string", description: "Price point ID in the base territory (from list_in_app_purchase_price_points)" },
+              baseTerritory: { type: "string", description: "Base territory ID (default: USA)" },
+              startDate: { type: "string", description: "Start date YYYY-MM-DD (optional; default: effective immediately)" }
+            },
+            required: ["inAppPurchaseId", "pricePointId"]
+          }
+        },
+        {
+          name: "get_in_app_purchase_price_schedule",
+          description: "Read back an in-app purchase's price schedule: base territory and manual prices with customer price. Pass territory to also see the automatic (equalized) price there.",
+          inputSchema: {
+            type: "object",
+            properties: {
+              inAppPurchaseId: { type: "string", description: "The ID of the in-app purchase" },
+              territory: { type: "string", description: "Filter prices to this territory and include its automatic price (optional)" }
+            },
+            required: ["inAppPurchaseId"]
+          }
+        },
+        {
+          name: "get_in_app_purchase_availability",
+          description: "Read an in-app purchase's availability: availableInNewTerritories and the list of territory IDs",
+          inputSchema: {
+            type: "object",
+            properties: {
+              inAppPurchaseId: { type: "string", description: "The ID of the in-app purchase" }
+            },
+            required: ["inAppPurchaseId"]
+          }
+        },
+        {
+          name: "set_in_app_purchase_availability",
+          description: "Set the territories where an in-app purchase is sold (replaces the current availability). Give territoryIds explicitly, or excludeTerritoryIds to select all territories except those (e.g. ['CHN']); pass excludeTerritoryIds: [] for all territories.",
+          inputSchema: {
+            type: "object",
+            properties: {
+              inAppPurchaseId: { type: "string", description: "The ID of the in-app purchase" },
+              availableInNewTerritories: { type: "boolean", description: "Automatically make available in territories Apple adds later" },
+              territoryIds: { type: "array", items: { type: "string" }, description: "Territory IDs to sell in, e.g. ['USA', 'JPN'] (optional)" },
+              excludeTerritoryIds: { type: "array", items: { type: "string" }, description: "Territory IDs to leave out, e.g. ['CHN'] (optional)" }
+            },
+            required: ["inAppPurchaseId", "availableInNewTerritories"]
+          }
+        },
+        {
+          name: "upload_in_app_purchase_review_screenshot",
+          description: "Upload the App Review screenshot for an in-app purchase from a local PNG/JPG (reserve → chunk upload → commit with MD5, then wait for processing). Each in-app purchase has one review screenshot; set replaceExisting to delete the current one first.",
+          inputSchema: {
+            type: "object",
+            properties: {
+              inAppPurchaseId: { type: "string", description: "The ID of the in-app purchase" },
+              filePath: { type: "string", description: "Absolute path to the local image" },
+              replaceExisting: { type: "boolean", description: "Delete the existing review screenshot first (default: false)" },
+              waitForProcessing: { type: "boolean", description: "Poll until processing finishes (default: true)" }
+            },
+            required: ["inAppPurchaseId", "filePath"]
+          }
+        },
+        {
+          name: "list_territories",
+          description: "List all App Store territories (ID like USA, JPN, CHN and currency)",
+          inputSchema: {
+            type: "object",
+            properties: {}
+          }
+        },
+
+        // Listing Tools (age rating, categories, review detail, version, price, availability)
+        {
+          name: "get_age_rating_declaration",
+          description: "Get the age rating questionnaire answers of the app's editable app info",
+          inputSchema: {
+            type: "object",
+            properties: {
+              appId: { type: "string", description: "The ID of the app (the editable app info is resolved)" },
+              appInfoId: { type: "string", description: "The ID of the app info (optional, overrides appId)" }
+            }
+          }
+        },
+        {
+          name: "update_age_rating_declaration",
+          description: "Update age rating questionnaire answers. attributes is a map such as { \"violenceCartoonOrFantasy\": \"NONE\", \"gambling\": false, \"lootBox\": false, \"messagingAndChat\": false, \"ageRatingOverrideV2\": \"NONE\" }. Frequency values: NONE, INFREQUENT_OR_MILD, FREQUENT_OR_INTENSE (or INFREQUENT, FREQUENT for newer questions).",
+          inputSchema: {
+            type: "object",
+            properties: {
+              ageRatingDeclarationId: { type: "string", description: "The ID of the age rating declaration (optional; resolved from appInfoId/appId)" },
+              appId: { type: "string", description: "The ID of the app" },
+              appInfoId: { type: "string", description: "The ID of the app info" },
+              attributes: { type: "object", description: "Age rating attributes to set", additionalProperties: true }
+            },
+            required: ["attributes"]
+          }
+        },
+        {
+          name: "list_app_categories",
+          description: "List top-level App Store categories with their subcategory IDs (e.g. GAMES → GAMES_CARD, GAMES_CASUAL)",
+          inputSchema: {
+            type: "object",
+            properties: {
+              platform: { type: "string", enum: ["IOS", "MAC_OS", "TV_OS", "VISION_OS"], description: "Platform (default: IOS)" }
+            }
+          }
+        },
+        {
+          name: "get_app_info_categories",
+          description: "Get the primary/secondary categories and subcategories set on the app's editable app info",
+          inputSchema: {
+            type: "object",
+            properties: {
+              appId: { type: "string", description: "The ID of the app" },
+              appInfoId: { type: "string", description: "The ID of the app info (optional, overrides appId)" }
+            }
+          }
+        },
+        {
+          name: "update_app_info_categories",
+          description: "Set the app's categories on its editable app info. Pass category IDs from list_app_categories; pass null to clear one (standard JSON:API, not declared in Apple's schema). Games use primaryCategory GAMES plus up to two GAMES_* subcategories.",
+          inputSchema: {
+            type: "object",
+            properties: {
+              appId: { type: "string", description: "The ID of the app" },
+              appInfoId: { type: "string", description: "The ID of the app info (optional, overrides appId)" },
+              primaryCategory: { type: ["string", "null"], description: "e.g. GAMES" },
+              primarySubcategoryOne: { type: ["string", "null"], description: "e.g. GAMES_CARD" },
+              primarySubcategoryTwo: { type: ["string", "null"], description: "e.g. GAMES_CASUAL" },
+              secondaryCategory: { type: ["string", "null"], description: "e.g. ENTERTAINMENT" },
+              secondarySubcategoryOne: { type: ["string", "null"], description: "Secondary subcategory (games only)" },
+              secondarySubcategoryTwo: { type: ["string", "null"], description: "Secondary subcategory (games only)" }
+            }
+          }
+        },
+        {
+          name: "get_app_store_review_detail",
+          description: "Get the App Review information (contact, demo account, notes) of an app store version",
+          inputSchema: {
+            type: "object",
+            properties: {
+              appStoreVersionId: { type: "string", description: "The ID of the app store version" }
+            },
+            required: ["appStoreVersionId"]
+          }
+        },
+        {
+          name: "create_app_store_review_detail",
+          description: "Create the App Review information for an app store version (use update_app_store_review_detail if one already exists)",
+          inputSchema: {
+            type: "object",
+            properties: {
+              appStoreVersionId: { type: "string", description: "The ID of the app store version" },
+              ...REVIEW_DETAIL_PROPERTIES
+            },
+            required: ["appStoreVersionId"]
+          }
+        },
+        {
+          name: "update_app_store_review_detail",
+          description: "Update the App Review information (contact, demo account, notes)",
+          inputSchema: {
+            type: "object",
+            properties: {
+              appStoreReviewDetailId: { type: "string", description: "The ID of the app store review detail" },
+              ...REVIEW_DETAIL_PROPERTIES
+            },
+            required: ["appStoreReviewDetailId"]
+          }
+        },
+        {
+          name: "update_app_store_version",
+          description: "Update an app store version's attributes: version string, copyright, release type, earliest release date",
+          inputSchema: {
+            type: "object",
+            properties: {
+              appStoreVersionId: { type: "string", description: "The ID of the app store version" },
+              versionString: { type: "string", description: "Version string, e.g. 1.0 (optional)" },
+              copyright: { type: "string", description: "e.g. '2026 Your Name' (optional)" },
+              releaseType: { type: "string", enum: ["MANUAL", "AFTER_APPROVAL", "SCHEDULED"], description: "How the version is released after approval (optional)" },
+              earliestReleaseDate: { type: ["string", "null"], description: "ISO 8601 date-time, only with releaseType SCHEDULED (optional)" },
+              downloadable: { type: "boolean", description: "Whether the version is downloadable (optional)" }
+            },
+            required: ["appStoreVersionId"]
+          }
+        },
+        {
+          name: "set_app_store_version_build",
+          description: "Attach a processed build to an app store version",
+          inputSchema: {
+            type: "object",
+            properties: {
+              appStoreVersionId: { type: "string", description: "The ID of the app store version" },
+              buildId: { type: "string", description: "The ID of the build" }
+            },
+            required: ["appStoreVersionId", "buildId"]
+          }
+        },
+        {
+          name: "list_app_price_points",
+          description: "List the app's price points in one territory (id + customerPrice + proceeds). customerPrice '0' finds the free price point.",
+          inputSchema: {
+            type: "object",
+            properties: {
+              appId: { type: "string", description: "The ID of the app" },
+              territory: { type: "string", description: "Territory ID (default: USA)" },
+              customerPrice: { type: "string", description: "Only return the price point with this customer price, e.g. '0' or '0.99' (optional)" }
+            },
+            required: ["appId"]
+          }
+        },
+        {
+          name: "get_app_price_schedule",
+          description: "Read the app's price schedule: base territory and manual prices with customer price",
+          inputSchema: {
+            type: "object",
+            properties: {
+              appId: { type: "string", description: "The ID of the app" },
+              territory: { type: "string", description: "Filter manual prices to this territory (optional)" }
+            },
+            required: ["appId"]
+          }
+        },
+        {
+          name: "set_app_price_schedule",
+          description: "Set the app's price: one manual price in the base territory (others equalized automatically). Pass free: true for a free app, or a pricePointId from list_app_price_points. Replaces the existing schedule.",
+          inputSchema: {
+            type: "object",
+            properties: {
+              appId: { type: "string", description: "The ID of the app" },
+              free: { type: "boolean", description: "Make the app free (looks up the 0.00 price point)" },
+              pricePointId: { type: "string", description: "Price point ID in the base territory" },
+              baseTerritory: { type: "string", description: "Base territory ID (default: USA)" },
+              startDate: { type: "string", description: "Start date YYYY-MM-DD (optional; default: effective immediately)" }
+            },
+            required: ["appId"]
+          }
+        },
+        {
+          name: "get_app_availability",
+          description: "Read the app's territory availability: availableInNewTerritories, counts, unavailable territories, contentStatus counts, and territory availability details (ID, available, contentStatuses) for the unavailable territories or the ones requested. Use the IDs with update_territory_availability.",
+          inputSchema: {
+            type: "object",
+            properties: {
+              appId: { type: "string", description: "The ID of the app" },
+              territories: { type: "array", items: { type: "string" }, description: "Return details for these territory IDs instead of the unavailable ones, e.g. ['USA', 'CHN'] (optional)" }
+            },
+            required: ["appId"]
+          }
+        },
+        {
+          name: "set_app_availability",
+          description: "Create the app's territory availability (POST /v2/appAvailabilities), listing every territory with available true/false. Give territoryIds, or excludeTerritoryIds to sell everywhere except those (e.g. ['CHN']). Only for an app with no availability yet; once it exists, change single territories with update_territory_availability.",
+          inputSchema: {
+            type: "object",
+            properties: {
+              appId: { type: "string", description: "The ID of the app" },
+              availableInNewTerritories: { type: "boolean", description: "Automatically make available in territories Apple adds later" },
+              territoryIds: { type: "array", items: { type: "string" }, description: "Territory IDs to sell in (optional)" },
+              excludeTerritoryIds: { type: "array", items: { type: "string" }, description: "Territory IDs to leave out, e.g. ['CHN'] (optional)" }
+            },
+            required: ["appId", "availableInNewTerritories"]
+          }
+        },
+        {
+          name: "update_territory_availability",
+          description: "Change the app's availability in one territory (ID from get_app_availability)",
+          inputSchema: {
+            type: "object",
+            properties: {
+              territoryAvailabilityId: { type: "string", description: "The ID of the territory availability" },
+              available: { type: "boolean", description: "Sell in this territory (optional)" },
+              releaseDate: { type: ["string", "null"], description: "Release date YYYY-MM-DD for pre-orders (optional)" },
+              preOrderEnabled: { type: "boolean", description: "Enable pre-orders (optional)" }
+            },
+            required: ["territoryAvailabilityId"]
+          }
+        },
+
         // Bundle ID Tools
         {
           name: "create_bundle_id",
@@ -1436,6 +1908,110 @@ class AppStoreConnectServer {
 
           case "delete_asset_library_media":
             return formatResponse(await this.assetLibraryHandlers.deleteAssetLibraryMedia(args as any));
+
+          // In-App Purchases
+          case "list_in_app_purchases":
+            return formatResponse(await this.inAppPurchaseHandlers.listInAppPurchases(args as any));
+
+          case "get_in_app_purchase":
+            return formatResponse(await this.inAppPurchaseHandlers.getInAppPurchase(args as any));
+
+          case "create_in_app_purchase":
+            return formatResponse(await this.inAppPurchaseHandlers.createInAppPurchase(args as any));
+
+          case "update_in_app_purchase":
+            return formatResponse(await this.inAppPurchaseHandlers.updateInAppPurchase(args as any));
+
+          case "delete_in_app_purchase":
+            return formatResponse(await this.inAppPurchaseHandlers.deleteInAppPurchase(args as any));
+
+          case "list_in_app_purchase_versions":
+            return formatResponse(await this.inAppPurchaseHandlers.listInAppPurchaseVersions(args as any));
+
+          case "create_in_app_purchase_version":
+            return formatResponse(await this.inAppPurchaseHandlers.createInAppPurchaseVersion(args as any));
+
+          case "list_in_app_purchase_localizations":
+            return formatResponse(await this.inAppPurchaseHandlers.listInAppPurchaseLocalizations(args as any));
+
+          case "create_in_app_purchase_localization":
+            return formatResponse(await this.inAppPurchaseHandlers.createInAppPurchaseLocalization(args as any));
+
+          case "update_in_app_purchase_localization":
+            return formatResponse(await this.inAppPurchaseHandlers.updateInAppPurchaseLocalization(args as any));
+
+          case "delete_in_app_purchase_localization":
+            return formatResponse(await this.inAppPurchaseHandlers.deleteInAppPurchaseLocalization(args as any));
+
+          case "list_in_app_purchase_price_points":
+            return formatResponse(await this.inAppPurchaseHandlers.listInAppPurchasePricePoints(args as any));
+
+          case "set_in_app_purchase_price":
+            return formatResponse(await this.inAppPurchaseHandlers.setInAppPurchasePrice(args as any));
+
+          case "get_in_app_purchase_price_schedule":
+            return formatResponse(await this.inAppPurchaseHandlers.getInAppPurchasePriceSchedule(args as any));
+
+          case "get_in_app_purchase_availability":
+            return formatResponse(await this.inAppPurchaseHandlers.getInAppPurchaseAvailability(args as any));
+
+          case "set_in_app_purchase_availability":
+            return formatResponse(await this.inAppPurchaseHandlers.setInAppPurchaseAvailability(args as any));
+
+          case "upload_in_app_purchase_review_screenshot":
+            return formatResponse(await this.inAppPurchaseHandlers.uploadInAppPurchaseReviewScreenshot(args as any));
+
+          // Listing (age rating, categories, review detail, version, price, availability)
+          case "list_territories":
+            return formatResponse(await this.listingHandlers.listTerritories(args as any));
+
+          case "get_age_rating_declaration":
+            return formatResponse(await this.listingHandlers.getAgeRatingDeclaration(args as any));
+
+          case "update_age_rating_declaration":
+            return formatResponse(await this.listingHandlers.updateAgeRatingDeclaration(args as any));
+
+          case "list_app_categories":
+            return formatResponse(await this.listingHandlers.listAppCategories(args as any));
+
+          case "get_app_info_categories":
+            return formatResponse(await this.listingHandlers.getAppInfoCategories(args as any));
+
+          case "update_app_info_categories":
+            return formatResponse(await this.listingHandlers.updateAppInfoCategories(args as any));
+
+          case "get_app_store_review_detail":
+            return formatResponse(await this.listingHandlers.getAppStoreReviewDetail(args as any));
+
+          case "create_app_store_review_detail":
+            return formatResponse(await this.listingHandlers.createAppStoreReviewDetail(args as any));
+
+          case "update_app_store_review_detail":
+            return formatResponse(await this.listingHandlers.updateAppStoreReviewDetail(args as any));
+
+          case "update_app_store_version":
+            return formatResponse(await this.listingHandlers.updateAppStoreVersion(args as any));
+
+          case "set_app_store_version_build":
+            return formatResponse(await this.listingHandlers.setAppStoreVersionBuild(args as any));
+
+          case "list_app_price_points":
+            return formatResponse(await this.listingHandlers.listAppPricePoints(args as any));
+
+          case "get_app_price_schedule":
+            return formatResponse(await this.listingHandlers.getAppPriceSchedule(args as any));
+
+          case "set_app_price_schedule":
+            return formatResponse(await this.listingHandlers.setAppPriceSchedule(args as any));
+
+          case "get_app_availability":
+            return formatResponse(await this.listingHandlers.getAppAvailability(args as any));
+
+          case "set_app_availability":
+            return formatResponse(await this.listingHandlers.setAppAvailability(args as any));
+
+          case "update_territory_availability":
+            return formatResponse(await this.listingHandlers.updateTerritoryAvailability(args as any));
 
           // Bundle IDs
           case "create_bundle_id":

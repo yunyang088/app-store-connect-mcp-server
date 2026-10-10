@@ -3,6 +3,9 @@ import { gunzipSync } from 'zlib';
 import { AuthService } from './auth.js';
 import { AppStoreConnectConfig } from '../types/index.js';
 
+// client 的 baseURL 是 /v1；v2 资源（inAppPurchases、appAvailabilities 等）用绝对地址，axios 遇到绝对地址会忽略 baseURL
+export const API_V2_BASE = 'https://api.appstoreconnect.apple.com/v2';
+
 export class AppStoreConnectClient {
   private axiosInstance: AxiosInstance;
   private authService: AuthService;

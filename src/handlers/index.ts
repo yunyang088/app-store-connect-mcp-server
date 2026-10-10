@@ -8,3 +8,5 @@ export { XcodeHandlers } from './xcode.js';
 export { LocalizationHandlers } from './localizations.js';
 export { ScreenshotHandlers } from './screenshots.js';
 export { AssetLibraryHandlers } from './assets.js';
+export { InAppPurchaseHandlers } from './inAppPurchases.js';
+export { ListingHandlers } from './listing.js';

@@ -26,3 +26,7 @@ export * from './screenshots.js';
 export * from './localizations.js';
 // Asset Library types
 export * from './assets.js';
+// In-App Purchase types
+export * from './inAppPurchases.js';
+// Listing types (age rating, categories, review detail, pricing, availability)
+export * from './listing.js';
